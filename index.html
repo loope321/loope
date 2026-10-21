@@ -1,0 +1,1832 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>🛒 MORIVA 마진 계산기</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛒</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;600;700;900&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.24.7/babel.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { background: #F7F4EC; overflow-x: hidden; }
+    #root { min-height: 100vh; }
+    select { -webkit-appearance: none; }
+    button { font-family: 'Noto Sans KR', sans-serif; }
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: #EFEAE0; }
+    ::-webkit-scrollbar-thumb { background: #E5DFCF; border-radius: 2px; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useMemo, useEffect, useRef } = React;
+
+    // ── CONSTANTS ─────────────────────────────────────────────────────────────
+    const CATS = [
+      { label: "생활/주방",    fee: 11   },
+      { label: "뷰티/코스메틱", fee: 11.5 },
+      { label: "패션/의류",    fee: 14   },
+      { label: "패션잡화",     fee: 12   },
+      { label: "스포츠/레저",  fee: 11   },
+      { label: "가전/디지털",  fee: 10.8 },
+      { label: "식품/건강",    fee: 10.8 },
+      { label: "반려동물",     fee: 11   },
+      { label: "완구/취미",    fee: 11   },
+      { label: "유아동",       fee: 11.5 },
+      { label: "직접입력",     fee: null },
+    ];
+    const RKTS = [
+      { label: "극소형 (50g 이하)",  fee: 1800 },
+      { label: "소형 (2kg 이하)",    fee: 2500 },
+      { label: "중형 (5kg 이하)",    fee: 3500 },
+      { label: "대형 (10kg 이하)",   fee: 5000 },
+      { label: "특대형 (10kg 초과)", fee: 7500 },
+      { label: "직접입력",           fee: null  },
+    ];
+
+    // ── HELPERS ───────────────────────────────────────────────────────────────
+    const nv  = v => parseFloat(String(v).replace(/,/g, "")) || 0;
+    const fmt = n => Math.round(n).toLocaleString("ko-KR");
+    const fp  = (n, d = 1) => Number(n).toFixed(d);
+    const mc  = r => r >= 20 ? "#4ADE80" : r >= 10 ? "#FACC15" : r >= 0 ? "#FB923C" : "#F87171";
+
+    const INPUT_STYLE = {
+      width: "100%", padding: "8px 10px", borderRadius: 6, outline: "none",
+      background: "#FBFAF6", border: "1px solid #E3DDCB", color: "#1E293B",
+      fontSize: 14, fontFamily: "JetBrains Mono, monospace",
+    };
+    const SELECT_STYLE = {
+      width: "100%", padding: "8px 10px", background: "#FBFAF6",
+      border: "1px solid #E3DDCB", borderRadius: 6, color: "#1E293B",
+      fontSize: 13, marginBottom: 8, cursor: "pointer", outline: "none",
+    };
+
+    // ── UI COMPONENTS (App 바깥에 정의 — 리렌더링 시 재생성 방지) ─────────────
+
+    function SL({ text }) {
+      return (
+        <div style={{ fontSize: 10, color: "#64748B", marginBottom: 4,
+          letterSpacing: "0.07em", textTransform: "uppercase", fontWeight: 700 }}>
+          {text}
+        </div>
+      );
+    }
+
+    function NumIn({ label, unit, value, onChange, placeholder }) {
+      return (
+        <div style={{ marginBottom: 12 }}>
+          <SL text={label + (unit ? ` (${unit})` : "")} />
+          <input
+            type="text"
+            inputMode="decimal"
+            value={value}
+            onChange={e => onChange(e.target.value)}
+            placeholder={placeholder}
+            style={INPUT_STYLE}
+          />
+        </div>
+      );
+    }
+
+    function TextIn({ label, value, onChange, placeholder, mono }) {
+      return (
+        <div style={{ marginBottom: 12 }}>
+          {label && <SL text={label} />}
+          <input
+            type="text"
+            value={value}
+            onChange={e => onChange(e.target.value)}
+            placeholder={placeholder}
+            style={{ ...INPUT_STYLE,
+              fontFamily: mono ? "JetBrains Mono, monospace" : "'Noto Sans KR', sans-serif",
+              fontSize: mono ? 11 : 13 }}
+          />
+        </div>
+      );
+    }
+
+    function Seg({ options, current, onChange }) {
+      return (
+        <div style={{ display: "flex", background: "#EFEAE0", borderRadius: 8,
+          padding: 3, border: "1px solid #E3DDCB", marginBottom: 12 }}>
+          {options.map(o => (
+            <button key={o.v} onClick={() => onChange(o.v)}
+              style={{ flex: 1, padding: "7px 4px", borderRadius: 6, border: "none",
+                cursor: "pointer", transition: "all .15s",
+                background: current === o.v ? "#EE4D2D" : "transparent",
+                color: current === o.v ? "#fff" : "#475569",
+                fontSize: 12, fontWeight: 700 }}>
+              {o.l}
+            </button>
+          ))}
+        </div>
+      );
+    }
+
+    function Toggle({ label, value, onChange }) {
+      return (
+        <div style={{ display: "flex", alignItems: "center",
+          justifyContent: "space-between", marginBottom: 12 }}>
+          <span style={{ fontSize: 13, color: "#94A3B8" }}>{label}</span>
+          <button onClick={() => onChange(!value)}
+            style={{ width: 44, height: 24, borderRadius: 12, border: "none",
+              cursor: "pointer", background: value ? "#EE4D2D" : "#E3DDCB",
+              position: "relative", transition: "background .2s" }}>
+            <span style={{ position: "absolute", top: 3, width: 18, height: 18,
+              left: value ? 23 : 3, borderRadius: "50%", background: "#fff",
+              boxShadow: "0 1px 3px rgba(0,0,0,0.25)",
+              transition: "left .2s", display: "block" }} />
+          </button>
+        </div>
+      );
+    }
+
+    function CostRow({ label, value, accent, bold }) {
+      return (
+        <div style={{ display: "flex", justifyContent: "space-between",
+          padding: "5px 0", borderBottom: "1px solid #F1ECE0" }}>
+          <span style={{ fontSize: 12, color: bold ? "#1E293B" : "#475569",
+            fontWeight: bold ? 700 : 400 }}>{label}</span>
+          <span style={{ fontSize: 12, fontFamily: "JetBrains Mono, monospace",
+            color: accent || (bold ? "#94A3B8" : "#334155"),
+            fontWeight: bold ? 700 : 400 }}>
+            {fmt(value)}원
+          </span>
+        </div>
+      );
+    }
+
+    function Card({ children, style: extra = {} }) {
+      return (
+        <div style={{ background: "#FFFFFF", borderRadius: 12,
+          padding: "16px 18px", border: "1px solid #E5DFCF",
+          boxShadow: "0 1px 3px rgba(20,20,10,0.04)",
+          marginBottom: 14, ...extra }}>
+          {children}
+        </div>
+      );
+    }
+
+    function PH({ children }) {
+      return (
+        <div style={{ fontSize: 10, color: "#475569", fontWeight: 700,
+          textTransform: "uppercase", letterSpacing: "0.12em", marginBottom: 12 }}>
+          {children}
+        </div>
+      );
+    }
+
+    function Sec({ emoji, title, children }) {
+      return (
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8,
+            paddingBottom: 8, marginBottom: 12, borderBottom: "1px solid #E5DFCF" }}>
+            <span style={{ fontSize: 14 }}>{emoji}</span>
+            <span style={{ fontSize: 10, fontWeight: 700, color: "#334155",
+              textTransform: "uppercase", letterSpacing: "0.1em" }}>{title}</span>
+          </div>
+          {children}
+        </div>
+      );
+    }
+
+    // ── MAIN APP ──────────────────────────────────────────────────────────────
+    function App() {
+      const [sp,    setSp   ] = useState("");
+      const [ch,    setCh   ] = useState("rocket");
+      const [ci,    setCi   ] = useState(0);
+      const [ccf,   setCcf  ] = useState("11");
+      const [cur,   setCur  ] = useState("CNY");
+      const [bp,    setBp   ] = useState("");
+      const [xrMode, setXrMode] = useState("manual"); // "manual" 수기입력 | "simple" 간편비율
+      const [simRate, setSimRate] = useState("300");
+      const [xrCny, setXrCny] = useState("227");
+      const [xrUsd, setXrUsd] = useState("1535");
+      const [cr,    setCr   ] = useState("8");
+      const [vat,   setVat  ] = useState(true);
+      const [fw,    setFw   ] = useState("2000");
+      const [cl,    setCl   ] = useState("1000");
+      const [ri,    setRi   ] = useState(1);
+      const [crf,   setCrf  ] = useState("2500");
+      const [promo, setPromo] = useState("none"); // "none" | "90" | "270" (로켓그로스 비용 제로 프로모션)
+      const [ms,    setMs   ] = useState("3000");
+      const [ar,    setAr   ] = useState("7");
+      const [rr,    setRr   ] = useState("3");
+      const [tm,    setTm   ] = useState("30");
+      const [taxType, setTaxType] = useState("simple_tax"); // "exempt" | "simple_tax" | "general"
+
+      // ── 상품 정보 ──
+      const [pName,    setPName   ] = useState("");
+      const [url1688,  setUrl1688 ] = useState("");
+      const [mCat,     setMCat    ] = useState("ACTIVE");
+      const [pMemo,    setPMemo   ] = useState("");
+      // 옵션: {name, imgUrl, bp, inputMode("margin"|"price"), targetMargin, sp}
+      const mkOpt = (n) => ({ name: `옵션 ${n}`, imgUrl: "", bp: "", inputMode: "margin", targetMargin: tm, sp: "" });
+      const [options,   setOptions  ] = useState(() => [mkOpt(1)]);
+      const [activeOpt, setActiveOpt] = useState(0);
+      // ── UI 상태 ──
+      const [showSaved,  setShowSaved ] = useState(false);
+      const [filterCat,  setFilterCat ] = useState("ALL");
+      const [copiedLink, setCopiedLink] = useState(false);
+      const [editingId,  setEditingId ] = useState(null); // 불러온 항목의 savedAt (덮어쓰기용)
+      const [savedList,  setSavedList ] = useState(() => {
+        try { return JSON.parse(localStorage.getItem("moriva_margin_v1") || "[]"); } catch { return []; }
+      });
+
+      // ── GitHub 동기화 상태 ──
+      const [ghToken,      setGhToken     ] = useState(() => localStorage.getItem("moriva_gh_token") || "");
+      const [ghRepo,       setGhRepo      ] = useState(() => localStorage.getItem("moriva_gh_repo") || "");
+      const [ghPath,       setGhPath      ] = useState(() => localStorage.getItem("moriva_gh_path") || "moriva_margin_data.json");
+      const [ghSha,        setGhSha       ] = useState(null);
+      const [syncStatus,   setSyncStatus  ] = useState("idle"); // idle | loading | success | error | notfound
+      const [showGhPanel,  setShowGhPanel ] = useState(false);
+      const didInitPull    = useRef(false);
+      const ghConfigured   = ghToken.trim() !== "" && ghRepo.trim() !== "";
+
+      const simpleMode = cur !== "KRW" && xrMode === "simple";
+
+      // ── SAVE / LOAD ──────────────────────────────────────────────────────────
+      const MCAT_COLORS = {
+        ACTIVE:"#EE4D2D", CAMP:"#16A34A", HOME:"#2563EB", PET:"#9333EA", BAG:"#CA8A04"
+      };
+
+      // 옵션 헬퍼
+      const addOpt = () => {
+        setOptions(prev => {
+          const next = [...prev, mkOpt(prev.length + 1)];
+          setActiveOpt(next.length - 1); // 새 옵션 즉시 활성화
+          return next;
+        });
+      };
+      const updateOpt = (i, key, val) =>
+        setOptions(prev => prev.map((o, j) => j === i ? { ...o, [key]: val } : o));
+      const removeOpt = (i) => {
+        if (options.length <= 1) return; // 최소 1개 유지
+        setOptions(prev => prev.filter((_, j) => j !== i));
+        if (activeOpt >= i && activeOpt > 0) setActiveOpt(activeOpt - 1);
+      };
+      // 스위치: 계산된 값을 반대 모드의 입력값으로 이전
+      const toggleMode = (i, res) => {
+        setOptions(prev => prev.map((o, j) => {
+          if (j !== i) return o;
+          if (o.inputMode === "margin") {
+            // 계산된 판매가 → 판매가 입력칸으로 이전, 판매가 모드로 전환
+            return { ...o, inputMode: "price", sp: res && res.sp > 0 ? String(Math.round(res.sp)) : o.sp };
+          } else {
+            // 계산된 마진율 → 목표 마진율 입력칸으로 이전, 마진율 모드로 전환
+            return { ...o, inputMode: "margin", targetMargin: res ? fp(res.marginRate) : o.targetMargin };
+          }
+        }));
+      };
+
+      // 옵션별 계산 (비활성 옵션 표시용)
+      const computeOpt = (opt) => {
+        const effR = xrMode === "simple" ? nv(simRate) : cur === "CNY" ? nv(xrCny) : nv(xrUsd);
+        const bk = cur === "KRW" ? nv(opt.bp) : nv(opt.bp) * effR;
+        const cst = simpleMode ? 0 : bk * (nv(cr)/100);
+        const vt  = simpleMode ? 0 : (vat ? (bk + cst) * 0.1 : 0);
+        const imp = bk + cst + vt + (simpleMode ? 0 : nv(fw)) + (simpleMode ? 0 : nv(cl));
+        const catF = CATS[ci].fee !== null ? CATS[ci].fee : nv(ccf);
+        const log  = (ch === "rocket" && promo === "90") ? 0
+          : ch === "rocket" ? (RKTS[ri].fee !== null ? RKTS[ri].fee : nv(crf)) : nv(ms);
+        const pA = ch === "rocket" && promo !== "none";
+        const varR = catF/100 + nv(ar)/100 + (pA ? 0 : nv(rr)/100 * 0.3);
+        const fixC = imp + log;
+        // 부가세 부담률 (목표 마진율 → 판매가 역산 시에도 동일하게 반영)
+        const taxR = taxType === "general" ? (1/11) : taxType === "simple_tax" ? 0.015 : 0;
+        const vatBurdenFor = (SP) => {
+          if (taxType === "general")    return Math.max(0, SP/11 - vt); // 매출세액 - 수입부가세 매입세액공제
+          if (taxType === "simple_tax") return SP * 0.015;
+          return 0;
+        };
+        if (opt.inputMode === "price") {
+          const SP = nv(opt.sp);
+          const mr = SP > 0 ? ((SP - fixC - SP*varR - vatBurdenFor(SP)) / SP * 100) : 0;
+          return { sp: SP, marginRate: mr };
+        } else {
+          const tgt = nv(opt.targetMargin);
+          const denom = 1 - varR - taxR - tgt/100;
+          const SP = denom > 0.001 ? fixC / denom : 0;
+          // 근사식으로 구한 판매가를 실제(정확한) 공식에 대입해 마진율 표시 → 목표치와 사실상 일치
+          const mr = SP > 0 ? ((SP - fixC - SP*varR - vatBurdenFor(SP)) / SP * 100) : 0;
+          return { sp: SP, marginRate: mr };
+        }
+      };
+
+      const collectState = () => ({
+        pName, url1688, mCat, pMemo, options, activeOpt,
+        sp, ch, ci: String(ci), ccf, cur, bp,
+        xrMode, simRate, xrCny, xrUsd,
+        cr, vat: vat ? "1" : "0", fw, cl,
+        ri: String(ri), crf, promo, ms, ar, rr, tm, taxType
+      });
+      const restoreState = (s) => {
+        if (s.pName   !== undefined) setPName(s.pName);
+        if (s.url1688 !== undefined) setUrl1688(s.url1688);
+        if (s.mCat    !== undefined) setMCat(s.mCat);
+        if (s.pMemo   !== undefined) setPMemo(s.pMemo);
+        if (s.options !== undefined && Array.isArray(s.options) && s.options.length > 0) {
+          // 구버전 옵션 구조 마이그레이션 (imgUrl, inputMode, targetMargin 없으면 기본값 추가)
+          const migrated = s.options.map((o, i) => ({
+            name: o.name || `옵션 ${i+1}`,
+            imgUrl: o.imgUrl || "",
+            bp: o.bp || "",
+            inputMode: o.inputMode || "margin",
+            targetMargin: o.targetMargin || s.tm || "30",
+            sp: o.sp || "",
+          }));
+          setOptions(migrated);
+          setActiveOpt(typeof s.activeOpt === "number" ? s.activeOpt : 0);
+        } else {
+          setOptions([mkOpt(1)]); setActiveOpt(0);
+        }
+        if (s.sp      !== undefined) setSp(s.sp);
+        if (s.ch      !== undefined) setCh(s.ch);
+        if (s.ci      !== undefined) setCi(Number(s.ci));
+        if (s.ccf     !== undefined) setCcf(s.ccf);
+        if (s.cur     !== undefined) setCur(s.cur);
+        if (s.bp      !== undefined) setBp(s.bp);
+        if (s.xrMode  !== undefined) setXrMode(s.xrMode);
+        if (s.simRate  !== undefined) setSimRate(s.simRate);
+        if (s.xrCny   !== undefined) setXrCny(s.xrCny);
+        if (s.xrUsd   !== undefined) setXrUsd(s.xrUsd);
+        if (s.cr      !== undefined) setCr(s.cr);
+        if (s.vat     !== undefined) setVat(s.vat === "1" || s.vat === true);
+        if (s.fw      !== undefined) setFw(s.fw);
+        if (s.cl      !== undefined) setCl(s.cl);
+        if (s.ri      !== undefined) setRi(Number(s.ri));
+        if (s.crf     !== undefined) setCrf(s.crf);
+        if (s.promo   !== undefined) setPromo(s.promo);
+        if (s.ms      !== undefined) setMs(s.ms);
+        if (s.ar      !== undefined) setAr(s.ar);
+        if (s.rr      !== undefined) setRr(s.rr);
+        if (s.tm      !== undefined) setTm(s.tm);
+        if (s.taxType !== undefined) setTaxType(s.taxType);
+      };
+      const persist = (list, skipGh = false) => {
+        setSavedList(list);
+        localStorage.setItem("moriva_margin_v1", JSON.stringify(list));
+        if (!skipGh && ghConfigured) pushToGitHub(list);
+      };
+
+      // ── GitHub API ────────────────────────────────────────────────────────────
+      const ghApiUrl = () =>
+        `https://api.github.com/repos/${ghRepo.trim()}/contents/${ghPath.trim()}`;
+      const ghHeaders = () => ({
+        "Authorization": `Bearer ${ghToken.trim()}`,
+        "Accept": "application/vnd.github+json",
+        "Content-Type": "application/json",
+        "X-GitHub-Api-Version": "2022-11-28"
+      });
+
+      const pullFromGitHub = async () => {
+        if (!ghConfigured) return;
+        setSyncStatus("loading");
+        try {
+          const res = await fetch(ghApiUrl(), { headers: ghHeaders() });
+          if (res.status === 404) { setSyncStatus("notfound"); return; }
+          if (!res.ok) throw new Error(res.status);
+          const data = await res.json();
+          setGhSha(data.sha);
+          const parsed = JSON.parse(decodeURIComponent(escape(atob(data.content.replace(/\n/g, "")))));
+          if (Array.isArray(parsed)) {
+            // 병합: savedAt 기준 중복 제거 후 최신 100개 유지
+            const merged = Object.values(
+              [...parsed, ...JSON.parse(localStorage.getItem("moriva_margin_v1") || "[]")]
+                .reduce((acc, it) => { acc[it.savedAt] = it; return acc; }, {})
+            ).sort((a, b) => b.savedAt - a.savedAt).slice(0, 100);
+            setSavedList(merged);
+            localStorage.setItem("moriva_margin_v1", JSON.stringify(merged));
+          }
+          setSyncStatus("success");
+        } catch (e) {
+          console.error("GitHub pull error:", e);
+          setSyncStatus("error");
+        }
+      };
+
+      const pushToGitHub = async (list) => {
+        if (!ghConfigured) return;
+        setSyncStatus("loading");
+        try {
+          // SHA 없으면 먼저 확인
+          let sha = ghSha;
+          if (!sha) {
+            const check = await fetch(ghApiUrl(), { headers: ghHeaders() });
+            if (check.ok) { const d = await check.json(); sha = d.sha; setGhSha(d.sha); }
+          }
+          const content = btoa(unescape(encodeURIComponent(JSON.stringify(list, null, 2))));
+          const body = {
+            message: `MORIVA 마진 데이터 업데이트 · ${new Date().toLocaleString("ko-KR")}`,
+            content,
+            ...(sha ? { sha } : {})
+          };
+          const res = await fetch(ghApiUrl(), {
+            method: "PUT", headers: ghHeaders(), body: JSON.stringify(body)
+          });
+          if (!res.ok) throw new Error(res.status);
+          const result = await res.json();
+          setGhSha(result.content.sha);
+          setSyncStatus("success");
+        } catch (e) {
+          console.error("GitHub push error:", e);
+          setSyncStatus("error");
+        }
+      };
+
+      // 앱 시작 시 GitHub에서 자동 pull
+      useEffect(() => {
+        if (!didInitPull.current && ghConfigured) {
+          didInitPull.current = true;
+          pullFromGitHub();
+        }
+      }, [ghConfigured]);
+      const saveItem = () => {
+        const optsSnap = options.map((o, i) => {
+          const res = i === activeOpt ? { sp: C.SP, marginRate: C.marginRate } : computeOpt(o);
+          return { ...o, _sp: res.sp, _marginRate: res.marginRate.toFixed(1) };
+        });
+        const now = editingId || Date.now();
+        const item = {
+          ...collectState(), options: optsSnap,
+          savedAt: now, _marginRate: C.marginRate.toFixed(1)
+        };
+        // 같은 항목(editingId)이면 제자리 업데이트, 아니면 맨 앞에 추가
+        const next = editingId
+          ? savedList.map(it => it.savedAt === editingId ? item : it)
+          : [item, ...savedList].slice(0, 100);
+        setEditingId(now); // 저장 후에도 같은 ID 유지
+        persist(next);
+      };
+      const loadItem = (item) => {
+        restoreState(item);
+        setEditingId(item.savedAt); // 불러온 항목 ID 기억 → 저장 시 덮어쓰기
+        setShowSaved(false);
+      };
+      const deleteItem = (idx, e) => { e.stopPropagation(); persist(savedList.filter((_, i) => i !== idx)); };
+      const shareUrl = () => {
+        try {
+          const enc = btoa(unescape(encodeURIComponent(JSON.stringify(collectState()))));
+          navigator.clipboard.writeText(location.origin + location.pathname + "#" + enc);
+          setCopiedLink(true); setTimeout(() => setCopiedLink(false), 2200);
+        } catch {}
+      };
+      // URL hash 복원 (공유 링크) — 새 항목으로 처리
+      useEffect(() => {
+        const hash = location.hash.slice(1);
+        if (!hash) return;
+        try {
+          restoreState(JSON.parse(decodeURIComponent(escape(atob(hash)))));
+          setEditingId(null); // 공유 링크는 새 항목으로 저장
+        } catch {}
+      }, []);
+
+      const C = useMemo(() => {
+        const activeOption = options[activeOpt] || null;
+        const rawBp = activeOption ? activeOption.bp : bp;
+
+        const effRate =
+          xrMode === "simple" ? nv(simRate)
+          : cur === "CNY" ? nv(xrCny) : nv(xrUsd);
+        const buyKrw = cur === "KRW" ? nv(rawBp) : nv(rawBp) * effRate;
+        const customs   = simpleMode ? 0 : buyKrw * (nv(cr) / 100);
+        const vatAmt    = simpleMode ? 0 : (vat ? (buyKrw + customs) * 0.1 : 0);
+        const fwAmt     = simpleMode ? 0 : nv(fw);
+        const clAmt     = simpleMode ? 0 : nv(cl);
+        const impTotal  = buyKrw + customs + vatAmt + fwAmt + clAmt;
+        const catFee    = CATS[ci].fee !== null ? CATS[ci].fee : nv(ccf);
+        const promoActive = ch === "rocket" && promo !== "none";
+        const baseLogistic = ch === "rocket"
+          ? (RKTS[ri].fee !== null ? RKTS[ri].fee : nv(crf)) : nv(ms);
+        const logistic  = (ch === "rocket" && promo === "90") ? 0 : baseLogistic;
+        const varRate   = catFee / 100 + nv(ar) / 100 + (promoActive ? 0 : (nv(rr) / 100) * 0.3);
+        const fixedC    = impTotal + logistic;
+        // 부가세 부담률 (목표 마진율 → 판매가 역산 시에도 반영해야 실제 마진율과 일치)
+        const taxRate   = taxType === "general" ? (1/11) : taxType === "simple_tax" ? 0.015 : 0;
+
+        // SP 결정: 활성 옵션 inputMode에 따라
+        let SP;
+        if (activeOption && activeOption.inputMode === "price") {
+          SP = nv(activeOption.sp);
+        } else if (activeOption && activeOption.inputMode === "margin") {
+          const tgt = nv(activeOption.targetMargin);
+          const denom = 1 - varRate - taxRate - tgt / 100;
+          SP = denom > 0.001 ? fixedC / denom : 0;
+        } else {
+          SP = nv(sp);
+        }
+
+        const commission = SP * (catFee / 100);
+        const adCost    = SP * (nv(ar) / 100);
+        const retCost   = promoActive ? 0 : SP * (nv(rr) / 100) * 0.3;
+        const sellTotal = commission + logistic + adCost + retCost;
+
+        // ── 부가세 계산 ──────────────────────────────────────────────────────
+        // 일반과세자: 매출세액(SP/11) - 매입세액공제(수입부가세) = 순납부세액
+        // 간이과세자: 도소매업 부가가치율 15% × 10% = SP × 1.5%
+        // 면세/비과세: 0
+        let outputVAT = 0, inputVATCredit = 0, vatBurden = 0;
+        if (taxType === "general") {
+          outputVAT     = SP / 11;                         // 매출세액
+          inputVATCredit = vatAmt;                          // 수입부가세 매입세액공제
+          vatBurden     = Math.max(0, outputVAT - inputVATCredit);
+        } else if (taxType === "simple_tax") {
+          outputVAT     = SP * 0.015;                      // 간이과세 도소매 1.5%
+          inputVATCredit = 0;
+          vatBurden     = outputVAT;
+        }
+
+        const totalCost = impTotal + sellTotal + vatBurden;
+        const margin    = SP - totalCost;
+        const marginRate = SP > 0 ? (margin / SP) * 100 : 0;
+
+        // BEP/목표가: varRate에 부가세율도 반영
+        const totalVarRate = varRate + taxRate;
+        const bepPrice  = totalVarRate < 1 ? fixedC / (1 - totalVarRate) : 0;
+        const tgtForMin = activeOption ? nv(activeOption.targetMargin) : nv(tm);
+        const minPrice  = (totalVarRate + tgtForMin / 100) < 1
+          ? fixedC / (1 - totalVarRate - tgtForMin / 100) : 0;
+        // 🎯 목표 마진 분석 패널에 입력한 목표 마진율(tm) 기준 최소가 (옵션의 목표 마진율과 무관)
+        const minPriceAtTm = (totalVarRate + nv(tm) / 100) < 1
+          ? fixedC / (1 - totalVarRate - nv(tm) / 100) : 0;
+        return {
+          SP, buyKrw, customs, vatAmt, fwAmt, clAmt, impTotal,
+          catFee, commission, logistic, adCost, retCost, sellTotal,
+          vatBurden, outputVAT, inputVATCredit,
+          totalCost, margin, marginRate, bepPrice, minPrice, tgtForMin, minPriceAtTm, effRate,
+          promoActive, fixedC, varRate,
+        };
+      }, [options, activeOpt, sp, bp, ch, ci, ccf, cur, xrMode, simRate, xrCny, xrUsd, simpleMode, cr, vat, fw, cl, ri, crf, promo, ms, ar, rr, tm, taxType]);
+
+      const BARS = [
+        { label: "수입원가", color: "#3B82F6", val: C.impTotal    },
+        { label: "수수료",   color: "#EE4D2D", val: C.commission  },
+        { label: "물류비",   color: "#F59E0B", val: C.logistic    },
+        { label: "광고비",   color: "#8B5CF6", val: C.adCost      },
+        { label: "반품비",   color: "#EC4899", val: C.retCost     },
+        { label: "부가세",   color: "#0EA5E9", val: C.vatBurden   },
+        { label: "이익",     color: mc(C.marginRate), val: Math.max(C.margin, 0) },
+      ];
+
+      return (
+        <div style={{ minHeight: "100vh", background: "#F7F4EC",
+          color: "#1E293B", fontFamily: "'Noto Sans KR', sans-serif", padding: 20 }}>
+
+          {/* MORIVA BRAND HEADER */}
+          <div style={{ maxWidth: 1080, margin: "0 auto 20px", borderRadius: 14,
+            overflow: "hidden", border: "1px solid #E5DFCF",
+            boxShadow: "0 2px 8px rgba(20,20,10,0.06)" }}>
+            <div style={{ background: "#10192B", padding: "20px 36px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 22, justifyContent: "center" }}>
+                {/* Mountain-M SVG Icon */}
+                <svg width="72" height="60" viewBox="0 0 72 60" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  {/* Left mountain */}
+                  <polyline points="2,56 24,10 36,30 48,10 70,56"
+                    fill="none" stroke="#FFFFFF" strokeWidth="6.5"
+                    strokeLinejoin="miter" strokeLinecap="round"/>
+                  {/* Inner V cut — creates the M notch */}
+                  <polyline points="17,56 24,10 36,30 48,10 55,56"
+                    fill="#10192B" stroke="#10192B" strokeWidth="1"/>
+                  {/* Re-draw clean white strokes over notch */}
+                  <line x1="2"  y1="56" x2="24" y2="10" stroke="#FFFFFF" strokeWidth="6.5" strokeLinecap="round"/>
+                  <line x1="24" y1="10" x2="36" y2="30" stroke="#FFFFFF" strokeWidth="6.5" strokeLinecap="round"/>
+                  <line x1="36" y1="30" x2="48" y2="10" stroke="#FFFFFF" strokeWidth="6.5" strokeLinecap="round"/>
+                  <line x1="48" y1="10" x2="70" y2="56" stroke="#FFFFFF" strokeWidth="6.5" strokeLinecap="round"/>
+                  {/* Gold diamond accent at top-center junction */}
+                  <polygon points="36,2 41,12 36,22 31,12"
+                    fill="#C9A227"/>
+                </svg>
+                {/* Divider */}
+                <div style={{ width: 1, height: 52, background: "#2A3A52" }} />
+                {/* Text stack */}
+                <div>
+                  <div style={{ fontSize: 26, fontWeight: 900, color: "#FFFFFF",
+                    letterSpacing: "0.12em", lineHeight: 1 }}>MORIVA</div>
+                  <div style={{ fontSize: 13, fontWeight: 500, color: "#C9A227",
+                    letterSpacing: "0.18em", marginTop: 4 }}>모 리 바</div>
+                  <div style={{ fontSize: 9.5, color: "#6B7E9B", letterSpacing: "0.22em",
+                    marginTop: 5, textTransform: "uppercase" }}>Better Life, Better Move</div>
+                </div>
+              </div>
+            </div>
+            <div style={{ background: "#FBFAF6", padding: "12px 28px",
+              display: "flex", justifyContent: "center", gap: 32, flexWrap: "wrap" }}>
+              {[
+                { e: "🏃", k: "ACTIVE", h: "액티브" },
+                { e: "⛺", k: "CAMP",   h: "캠프"   },
+                { e: "🏠", k: "HOME",   h: "홈"     },
+                { e: "🐾", k: "PET",    h: "펫"     },
+                { e: "👜", k: "BAG",    h: "백"     },
+              ].map((c, i) => (
+                <div key={i} style={{ textAlign: "center" }}>
+                  <div style={{ fontSize: 15 }}>{c.e}</div>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: "#1E293B", marginTop: 3 }}>{c.k}</div>
+                  <div style={{ fontSize: 9, color: "#94A3B8" }}>{c.h}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* HEADER */}
+          <div style={{ maxWidth: 1080, margin: "0 auto 20px" }}>
+            <div style={{ display: "flex", alignItems: "center" }}>
+              <div>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+                  <span style={{ fontSize: 20, fontWeight: 900, color: "#EE4D2D",
+                    letterSpacing: "-0.02em" }}>COUPANG</span>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: "#8C8472",
+                    letterSpacing: "0.14em", textTransform: "uppercase" }}>
+                    Gross Margin Calculator
+                  </span>
+                </div>
+                <div style={{ fontSize: 11, color: "#8C8472", marginTop: 2 }}>
+                  중국 직소싱 상품 수익성 분석 · 수입원가 + 관부가세 + 판매비 자동 계산
+                </div>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                {/* GitHub 동기화 상태 버튼 */}
+                <button onClick={() => setShowGhPanel(true)}
+                  style={{ padding: "7px 14px", borderRadius: 8,
+                    border: "1px solid " + (
+                      syncStatus === "success"  ? "#86EFAC" :
+                      syncStatus === "error"    ? "#FCA5A5" :
+                      syncStatus === "loading"  ? "#93C5FD" : "#E5DFCF"),
+                    background: (
+                      syncStatus === "success"  ? "#DCFCE7" :
+                      syncStatus === "error"    ? "#FEF2F2" :
+                      syncStatus === "loading"  ? "#EFF6FF" : "#fff"),
+                    cursor: "pointer", fontSize: 12, fontWeight: 700,
+                    color: (
+                      syncStatus === "success"  ? "#16A34A" :
+                      syncStatus === "error"    ? "#DC2626" :
+                      syncStatus === "loading"  ? "#3B82F6" :
+                      ghConfigured ? "#10192B" : "#94A3B8"),
+                    boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
+                  {syncStatus === "loading"  ? "☁ 동기화 중..." :
+                   syncStatus === "success"  ? "☁ 동기화 완료" :
+                   syncStatus === "error"    ? "☁ 동기화 오류" :
+                   syncStatus === "notfound" ? "☁ 파일 없음"   :
+                   ghConfigured             ? "☁ GitHub 연결됨" : "☁ GitHub 설정"}
+                </button>
+                <button onClick={() => setShowSaved(true)}
+                  style={{ padding: "7px 14px", borderRadius: 8,
+                    border: "1px solid #E5DFCF", background: "#fff",
+                    cursor: "pointer", fontSize: 12, fontWeight: 700, color: "#10192B",
+                    boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
+                  📋 저장목록{savedList.length > 0 ? ` (${savedList.length})` : ""}
+                </button>
+                {(() => {
+                  const diff = C.marginRate - nv(tm);
+                  const hit  = Math.abs(diff) < 0.05;
+                  const over = diff > 0;
+                  const dCol = hit ? "#2563EB" : over ? "#16A34A" : "#B45309";
+                  return (
+                    <div style={{ padding: "6px 14px", borderRadius: 8,
+                      background: dCol + "12", border: "1px solid " + dCol + "30",
+                      textAlign: "center" }}>
+                      <div style={{ fontSize: 12, fontWeight: 800, color: dCol,
+                        fontFamily: "JetBrains Mono, monospace" }}>
+                        목표 {fp(nv(tm))}%
+                      </div>
+                      <div style={{ fontSize: 10, color: dCol, opacity: 0.85 }}>
+                        {hit ? "달성" : `${over ? "+" : ""}${fp(diff)}%p ${over ? "초과" : "부족"}`}
+                      </div>
+                    </div>
+                  );
+                })()}
+                <div style={{ padding: "6px 16px", borderRadius: 8,
+                  background: mc(C.marginRate) + "12",
+                  border: "1px solid " + mc(C.marginRate) + "30" }}>
+                  <span style={{ fontSize: 24, fontFamily: "JetBrains Mono, monospace",
+                    fontWeight: 900, color: mc(C.marginRate) }}>
+                    {fp(C.marginRate)}%
+                  </span>
+                  <span style={{ fontSize: 12, color: mc(C.marginRate),
+                    opacity: 0.7, marginLeft: 6 }}>마진율</span>
+                </div>
+              </div>
+            </div>
+            <div style={{ height: 1, marginTop: 12,
+              background: "linear-gradient(90deg,#EE4D2D55,#EE4D2D18,transparent)" }} />
+          </div>
+
+          {/* MAIN GRID */}
+          <div style={{ maxWidth: 1080, margin: "0 auto", display: "grid",
+            gridTemplateColumns: "370px 1fr", gap: 16, alignItems: "start" }}>
+
+            {/* ──── LEFT: INPUTS ──── */}
+            <div style={{ paddingRight: 2 }}>
+
+              {/* 상품 정보 카드 */}
+              <Card>
+                <Sec emoji="📝" title="상품 정보">
+                  <TextIn label="상품명" value={pName} onChange={setPName} placeholder="예: 접이식 등산스틱 3단" />
+
+                  {/* 1688 URL */}
+                  <SL text="1688 상품 URL" />
+                  <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+                    <input type="text" value={url1688} onChange={e => setUrl1688(e.target.value)}
+                      placeholder="https://detail.1688.com/..."
+                      style={{ ...INPUT_STYLE, flex: 1, fontSize: 11, fontFamily: "JetBrains Mono, monospace" }} />
+                    {url1688 && (
+                      <button onClick={() => window.open(url1688, "_blank")}
+                        style={{ padding: "8px 10px", borderRadius: 6, border: "1px solid #E5DFCF",
+                          background: "#FFF3E0", color: "#EA6000", cursor: "pointer",
+                          fontWeight: 700, fontSize: 12, whiteSpace: "nowrap" }}>
+                        🔗 열기
+                      </button>
+                    )}
+                  </div>
+
+                  {/* MORIVA 카테고리 */}
+                  <SL text="MORIVA 카테고리" />
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
+                    {[
+                      { v: "ACTIVE", e: "🏃" }, { v: "CAMP", e: "⛺" }, { v: "HOME", e: "🏠" },
+                      { v: "PET",   e: "🐾" }, { v: "BAG",  e: "👜" }
+                    ].map(c => (
+                      <button key={c.v} onClick={() => setMCat(c.v)}
+                        style={{ padding: "5px 12px", borderRadius: 20, border: "none",
+                          cursor: "pointer", fontWeight: 700, fontSize: 11,
+                          background: mCat === c.v ? (MCAT_COLORS[c.v] || "#10192B") : "#EFEAE0",
+                          color: mCat === c.v ? "#fff" : "#64748B" }}>
+                        {c.e} {c.v}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* 메모 */}
+                  <SL text="메모" />
+                  <textarea value={pMemo} onChange={e => setPMemo(e.target.value)}
+                    placeholder="소싱 메모, 특이사항, 1688 판매량 등"
+                    rows={2}
+                    style={{ ...INPUT_STYLE, resize: "vertical",
+                      fontFamily: "'Noto Sans KR', sans-serif", fontSize: 12, marginBottom: 14 }} />
+
+                  {/* ── 옵션 관리 ── */}
+                  <div style={{ borderTop: "1px solid #E5DFCF", paddingTop: 12 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between",
+                      alignItems: "center", marginBottom: 10 }}>
+                      <SL text={`옵션 (${options.length}개)`} />
+                      <button onClick={addOpt}
+                        style={{ padding: "3px 12px", borderRadius: 20, border: "1px solid #E5DFCF",
+                          background: "#F7F4EC", color: "#475569", cursor: "pointer",
+                          fontSize: 11, fontWeight: 700 }}>
+                        + 옵션 추가
+                      </button>
+                    </div>
+
+                    {options.map((opt, i) => {
+                      const isActive = activeOpt === i;
+                      const res = isActive ? { sp: C.SP, marginRate: C.marginRate }
+                        : (opt.bp ? computeOpt(opt) : null);
+
+                      return (
+                        <div key={i} style={{ marginBottom: 12, borderRadius: 10,
+                          border: "2px solid " + (isActive ? "#3B82F6" : "#E5DFCF"),
+                          overflow: "hidden" }}>
+
+                          {/* 옵션 탭 헤더 */}
+                          <div onClick={() => setActiveOpt(i)}
+                            style={{ display: "flex", justifyContent: "space-between",
+                              alignItems: "center", padding: "8px 12px", cursor: "pointer",
+                              background: isActive ? "#EFF6FF" : "#FBFAF6" }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                              <span style={{ width: 18, height: 18, borderRadius: "50%",
+                                background: isActive ? "#3B82F6" : "#E5DFCF",
+                                display: "inline-flex", alignItems: "center", justifyContent: "center",
+                                fontSize: 10, color: isActive ? "#fff" : "#94A3B8", fontWeight: 700 }}>
+                                {i+1}
+                              </span>
+                              <input value={opt.name}
+                                onChange={e => { e.stopPropagation(); updateOpt(i,"name",e.target.value); }}
+                                onClick={e => e.stopPropagation()}
+                                style={{ border: "none", background: "transparent", fontWeight: 700,
+                                  fontSize: 13, color: isActive ? "#1E3A8A" : "#334155",
+                                  width: 120, outline: "none" }} />
+                            </div>
+                            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                              {res && res.sp > 0 && (
+                                <span style={{ fontSize: 11, fontFamily: "JetBrains Mono, monospace",
+                                  fontWeight: 700, color: mc(res.marginRate) }}>
+                                  {fp(res.marginRate)}%
+                                </span>
+                              )}
+                              {options.length > 1 && (
+                                <button onClick={e => { e.stopPropagation(); removeOpt(i); }}
+                                  style={{ background: "none", border: "none", color: "#CBD5E1",
+                                    cursor: "pointer", fontSize: 14, padding: 0, lineHeight: 1 }}>✕</button>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* 옵션 입력 바디 (활성 옵션만 상세 표시) */}
+                          {isActive && (
+                            <div style={{ padding: "12px 12px 10px", background: "#fff" }}>
+
+                              {/* 이미지 URL */}
+                              <SL text="이미지 URL" />
+                              <div style={{ display: "flex", gap: 6, marginBottom: opt.imgUrl ? 8 : 12 }}>
+                                <input type="text" value={opt.imgUrl}
+                                  onChange={e => updateOpt(i,"imgUrl",e.target.value)}
+                                  placeholder="https://img.alicdn.com/..."
+                                  style={{ ...INPUT_STYLE, flex: 1, fontSize: 11,
+                                    fontFamily: "JetBrains Mono, monospace" }} />
+                                {opt.imgUrl && (
+                                  <button onClick={() => updateOpt(i,"imgUrl","")}
+                                    style={{ padding: "6px 9px", borderRadius: 6, border: "1px solid #E5DFCF",
+                                      background: "#FEF2F2", color: "#EF4444", cursor: "pointer",
+                                      fontWeight: 700, fontSize: 12 }}>✕</button>
+                                )}
+                              </div>
+                              {opt.imgUrl && (
+                                <div style={{ width: "100%", height: 130, marginBottom: 12,
+                                  borderRadius: 8, overflow: "hidden", border: "1px solid #E5DFCF",
+                                  background: "#F7F4EC", display: "flex",
+                                  alignItems: "center", justifyContent: "center" }}>
+                                  <img src={opt.imgUrl} alt="옵션 이미지"
+                                    style={{ width: "100%", height: "100%", objectFit: "contain" }}
+                                    onError={e => { e.target.style.display="none";
+                                      e.target.parentElement.innerHTML="<span style='color:#94A3B8;font-size:11px'>이미지 불러오기 실패</span>"; }} />
+                                </div>
+                              )}
+
+                              {/* ① 매입가 */}
+                              <NumIn label="① 매입가" unit={cur} value={opt.bp}
+                                onChange={v => updateOpt(i,"bp",v)} placeholder="예: 15" />
+
+                              {/* ② 마진율 ↔ 판매가 스위치 */}
+                              <SL text="② 판매가 설정" />
+                              <div style={{ display: "flex", alignItems: "center",
+                                gap: 8, marginBottom: 12 }}>
+                                {/* 입력칸 */}
+                                <div style={{ flex: 1 }}>
+                                  <input
+                                    type="text" inputMode="decimal"
+                                    value={opt.inputMode === "margin" ? opt.targetMargin : opt.sp}
+                                    onChange={e => updateOpt(i,
+                                      opt.inputMode === "margin" ? "targetMargin" : "sp",
+                                      e.target.value)}
+                                    placeholder={opt.inputMode === "margin" ? "마진율 %" : "판매가 ₩"}
+                                    style={{ ...INPUT_STYLE, marginBottom: 0,
+                                      borderColor: "#C9A227",
+                                      fontFamily: "JetBrains Mono, monospace", fontSize: 14,
+                                      fontWeight: 700 }}
+                                  />
+                                  <div style={{ fontSize: 10, color: "#94A3B8", marginTop: 3,
+                                    textAlign: "center" }}>
+                                    {opt.inputMode === "margin" ? "목표 마진율 (%)" : "판매가 (₩ KRW)"}
+                                  </div>
+                                </div>
+
+                                {/* 스위치 버튼 */}
+                                <button onClick={() => toggleMode(i, res)}
+                                  title="값 이전 후 모드 전환"
+                                  style={{ flexShrink: 0, width: 40, height: 40, borderRadius: "50%",
+                                    border: "2px solid #10192B", background: "#10192B",
+                                    color: "#fff", cursor: "pointer", fontSize: 15,
+                                    display: "flex", alignItems: "center", justifyContent: "center" }}>
+                                  ⇄
+                                </button>
+
+                                {/* 계산 결과 */}
+                                <div style={{ flex: 1, padding: "8px 10px", borderRadius: 8,
+                                  background: res && res.sp > 0 ? (mc(res.marginRate) + "0F") : "#F7F4EC",
+                                  border: "1px solid " + (res && res.sp > 0 ? mc(res.marginRate) + "40" : "#E5DFCF"),
+                                  textAlign: "center" }}>
+                                  {res && res.sp > 0 ? (
+                                    <React.Fragment>
+                                      <div style={{ fontSize: 9, color: "#94A3B8", marginBottom: 2 }}>
+                                        {opt.inputMode === "margin" ? "적정 판매가" : "마진율"}
+                                      </div>
+                                      <div style={{ fontSize: 14, fontWeight: 900,
+                                        fontFamily: "JetBrains Mono, monospace",
+                                        color: mc(res.marginRate) }}>
+                                        {opt.inputMode === "margin"
+                                          ? `₩${fmt(Math.round(res.sp))}`
+                                          : `${fp(res.marginRate)}%`}
+                                      </div>
+                                    </React.Fragment>
+                                  ) : (
+                                    <div style={{ fontSize: 10, color: "#CBD5E1" }}>—</div>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* 비활성 옵션 요약 */}
+                          {!isActive && opt.bp && res && res.sp > 0 && (
+                            <div style={{ padding: "6px 12px 8px",
+                              display: "flex", justifyContent: "space-between",
+                              background: "#fff", fontSize: 11, color: "#64748B" }}>
+                              <span>매입가 <b style={{ color: "#334155" }}>{opt.bp} {cur}</b></span>
+                              <span>판매가 <b style={{ color: "#334155" }}>₩{fmt(Math.round(res.sp))}</b></span>
+                              <span style={{ color: mc(res.marginRate), fontWeight: 700 }}>{fp(res.marginRate)}%</span>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* 저장 / 공유 */}
+                  {editingId && (
+                    <div style={{ display: "flex", alignItems: "center", gap: 6,
+                      padding: "6px 10px", borderRadius: 7, marginBottom: 8,
+                      background: "#EFF6FF", border: "1px solid #93C5FD" }}>
+                      <span style={{ fontSize: 11, color: "#2563EB", flex: 1 }}>
+                        ✏️ 불러온 항목 수정 중 — 저장 시 덮어씁니다
+                      </span>
+                      <button onClick={() => { setEditingId(null); }}
+                        style={{ fontSize: 10, padding: "2px 8px", borderRadius: 10,
+                          border: "1px solid #93C5FD", background: "#fff",
+                          color: "#2563EB", cursor: "pointer", fontWeight: 700, whiteSpace: "nowrap" }}>
+                        새 항목으로
+                      </button>
+                    </div>
+                  )}
+                  <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+                    <button onClick={saveItem}
+                      style={{ flex: 1, padding: "9px 0", borderRadius: 8,
+                        background: editingId ? "#2563EB" : "#10192B",
+                        color: "#fff", border: "none",
+                        fontWeight: 700, fontSize: 13, cursor: "pointer" }}>
+                      {editingId ? "💾 저장 (덮어쓰기)" : "💾 저장"}
+                    </button>
+                    <button onClick={shareUrl}
+                      style={{ flex: 1, padding: "9px 0", borderRadius: 8,
+                        background: copiedLink ? "#DCFCE7" : "#F7F4EC",
+                        color: copiedLink ? "#16A34A" : "#475569",
+                        border: "1px solid " + (copiedLink ? "#86EFAC" : "#E5DFCF"),
+                        fontWeight: 700, fontSize: 13, cursor: "pointer" }}>
+                      {copiedLink ? "✅ 복사됨" : "🔗 링크 복사"}
+                    </button>
+                  </div>
+                </Sec>
+              </Card>
+
+              <Card>
+                <Sec emoji="📦" title="판매 정보">
+                  {options.length === 0 && (
+                    <NumIn label="판매가" unit="KRW" value={sp} onChange={setSp} placeholder="예: 29800" />
+                  )}
+                  <SL text="판매 채널" />
+                  <Seg
+                    options={[{ v: "rocket", l: "🚀 로켓그로스" }, { v: "market", l: "🏪 마켓플레이스" }]}
+                    current={ch} onChange={setCh}
+                  />
+                  <SL text="카테고리" />
+                  <select value={ci} onChange={e => setCi(Number(e.target.value))} style={SELECT_STYLE}>
+                    {CATS.map((c, i) => (
+                      <option key={i} value={i}>{c.label}{c.fee !== null ? ` — ${c.fee}%` : " — 직접입력"}</option>
+                    ))}
+                  </select>
+                  {CATS[ci].fee === null && (
+                    <NumIn label="카테고리 수수료율" unit="%" value={ccf} onChange={setCcf} />
+                  )}
+                </Sec>
+              </Card>
+
+              <Card style={simpleMode ? { opacity: 0.5 } : {}}>
+                <Sec emoji="🛃" title="수입 비용 · 환율">
+                  {/* 결제 통화 + 환율 (구 '중국 사입 원가' 카드에서 이전) */}
+                  <SL text="결제 통화" />
+                  <Seg
+                    options={[{ v: "CNY", l: "위안 CNY" }, { v: "USD", l: "달러 USD" }, { v: "KRW", l: "원 KRW" }]}
+                    current={cur} onChange={setCur}
+                  />
+                  {cur !== "KRW" && (
+                    <React.Fragment>
+                      <SL text="환율 적용 방식" />
+                      <Seg
+                        options={[{ v: "manual", l: "수기 입력" }, { v: "simple", l: "간편비율" }]}
+                        current={xrMode} onChange={setXrMode}
+                      />
+                      {xrMode === "manual" ? (
+                        cur === "CNY"
+                          ? <NumIn label="CNY → KRW 환율 (오늘 기준)" unit="₩/¥" value={xrCny} onChange={setXrCny} />
+                          : <NumIn label="USD → KRW 환율 (오늘 기준)" unit="₩/$" value={xrUsd} onChange={setXrUsd} />
+                      ) : (
+                        <React.Fragment>
+                          <div style={{ fontSize: 10, color: "#475569", marginBottom: 8 }}>
+                            관부가세·운송비 등 버퍼 포함 추정 — 기본 ₩300, 직접 수정 가능
+                          </div>
+                          <NumIn label="간편비율" unit={`₩/${cur === "CNY" ? "¥" : "$"}`}
+                            value={simRate} onChange={setSimRate} />
+                        </React.Fragment>
+                      )}
+                    </React.Fragment>
+                  )}
+                  {/* 수입 부대비용 */}
+                  {simpleMode && (
+                    <div style={{ fontSize: 11, color: "#92650D", background: "#FFF6DE",
+                      border: "1px solid #F3E0A8", borderRadius: 6, padding: "8px 10px",
+                      marginBottom: 12 }}>
+                      간편비율(₩{fmt(nv(simRate))})에 이미 포함되어 있어 비활성화됨
+                    </div>
+                  )}
+                  <div style={{ pointerEvents: simpleMode ? "none" : "auto" }}>
+                    <NumIn label="관세율" unit="%" value={cr} onChange={setCr} />
+                    <Toggle label="수입부가세 10% 포함" value={vat} onChange={setVat} />
+                    <NumIn label="포워딩 / 국제배송비" unit="KRW" value={fw} onChange={setFw} />
+                    <NumIn label="통관비" unit="KRW" value={cl} onChange={setCl} />
+                  </div>
+                </Sec>
+              </Card>
+
+              <Card>
+                <Sec emoji="🚚" title="판매 / 운영 비용">
+                  {ch === "rocket" && (
+                    <React.Fragment>
+                      <SL text="🎁 로켓그로스 비용 제로 프로모션" />
+                      <Seg
+                        options={[
+                          { v: "none", l: "미적용" },
+                          { v: "90",   l: "첫 90일" },
+                          { v: "270",  l: "+270일" },
+                        ]}
+                        current={promo} onChange={setPromo}
+                      />
+                      {promo === "90" && (
+                        <div style={{ fontSize: 11, color: "#1A7A4C", background: "#EAF7EE",
+                          border: "1px solid #BFE6CC", borderRadius: 6, padding: "8px 10px",
+                          marginBottom: 12 }}>
+                          ✅ 첫 90일 혜택 적용 중 — 물류비(입출고/배송) + 반품비 전액 무료<br/>
+                          (보관비·반출비도 실제로는 무료지만 이 계산기엔 별도 항목이 없어 미반영)
+                        </div>
+                      )}
+                      {promo === "270" && (
+                        <div style={{ fontSize: 11, color: "#1A7A4C", background: "#EAF7EE",
+                          border: "1px solid #BFE6CC", borderRadius: 6, padding: "8px 10px",
+                          marginBottom: 12 }}>
+                          ✅ 추가 270일(로켓그로스 세이버) 적용 중 — 반품비만 계속 무료<br/>
+                          물류비는 정상 부과 (보관비는 입고 건당 60일 무료, 이 계산기엔 미반영)
+                        </div>
+                      )}
+                    </React.Fragment>
+                  )}
+                  {ch === "rocket" ? (
+                    <React.Fragment>
+                      <SL text="로켓그로스 상품 사이즈" />
+                      <select value={ri} onChange={e => setRi(Number(e.target.value))} style={SELECT_STYLE}>
+                        {RKTS.map((r, i) => (
+                          <option key={i} value={i}>
+                            {r.label}{r.fee !== null ? ` — ${r.fee.toLocaleString()}원` : ""}
+                          </option>
+                        ))}
+                      </select>
+                      {RKTS[ri].fee === null && (
+                        <NumIn label="로켓그로스 물류비" unit="KRW" value={crf} onChange={setCrf} />
+                      )}
+                      {promo === "90" && (
+                        <div style={{ fontSize: 10, color: "#1A7A4C", marginTop: -8, marginBottom: 12 }}>
+                          → 프로모션으로 0원 처리됨
+                        </div>
+                      )}
+                    </React.Fragment>
+                  ) : (
+                    <NumIn label="마켓플레이스 배송비" unit="KRW" value={ms} onChange={setMs} />
+                  )}
+                  <NumIn label="광고비율" unit="%" value={ar} onChange={setAr} />
+                  <NumIn label="예상 반품율" unit="%" value={rr} onChange={setRr} />
+                  {C.promoActive && (
+                    <div style={{ fontSize: 10, color: "#1A7A4C", marginTop: -8, marginBottom: 12 }}>
+                      → 프로모션으로 반품비 0원 처리됨
+                    </div>
+                  )}
+                </Sec>
+              </Card>
+
+              {/* 세금 설정 */}
+              <Card>
+                <Sec emoji="🧾" title="세금 설정 (부가세)">
+                  <SL text="과세 유형" />
+                  <div style={{ display: "flex", flexDirection: "column", gap: 7, marginBottom: 14 }}>
+                    {[
+                      { v: "exempt",     label: "면세 / 비과세",   desc: "부가세 부담 없음" },
+                      { v: "simple_tax", label: "간이과세자",       desc: "매출의 1.5% 납부 (도소매 기준)" },
+                      { v: "general",    label: "일반과세자",       desc: "매출세액 - 매입세액공제 납부" },
+                    ].map(t => (
+                      <div key={t.v} onClick={() => setTaxType(t.v)}
+                        style={{ display: "flex", alignItems: "center", gap: 10,
+                          padding: "9px 12px", borderRadius: 8, cursor: "pointer",
+                          border: "1px solid " + (taxType === t.v ? "#10192B" : "#E5DFCF"),
+                          background: taxType === t.v ? "#10192B" : "#FBFAF6" }}>
+                        <div style={{ width: 16, height: 16, borderRadius: "50%", flexShrink: 0,
+                          border: "2px solid " + (taxType === t.v ? "#fff" : "#CBD5E1"),
+                          background: taxType === t.v ? "#fff" : "transparent",
+                          display: "flex", alignItems: "center", justifyContent: "center" }}>
+                          {taxType === t.v && <div style={{ width: 7, height: 7, borderRadius: "50%", background: "#10192B" }} />}
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 13, fontWeight: 700,
+                            color: taxType === t.v ? "#fff" : "#334155" }}>{t.label}</div>
+                          <div style={{ fontSize: 10, color: "#94A3B8", marginTop: 1 }}>{t.desc}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  {taxType !== "exempt" && C.SP > 0 && (
+                    <div style={{ background: "#F0F9FF", border: "1px solid #BAE6FD",
+                      borderRadius: 8, padding: "10px 12px", fontSize: 11 }}>
+                      {taxType === "general" && (
+                        <React.Fragment>
+                          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                            <span style={{ color: "#475569" }}>매출세액 (SP ÷ 11)</span>
+                            <span style={{ fontFamily: "JetBrains Mono, monospace", color: "#0369A1" }}>
+                              {fmt(Math.round(C.outputVAT))}원
+                            </span>
+                          </div>
+                          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                            <span style={{ color: "#475569" }}>매입세액공제 (수입부가세)</span>
+                            <span style={{ fontFamily: "JetBrains Mono, monospace", color: "#16A34A" }}>
+                              -{fmt(Math.round(C.inputVATCredit))}원
+                            </span>
+                          </div>
+                          <div style={{ display: "flex", justifyContent: "space-between",
+                            borderTop: "1px solid #BAE6FD", paddingTop: 6, fontWeight: 700 }}>
+                            <span style={{ color: "#0369A1" }}>순 납부 부가세</span>
+                            <span style={{ fontFamily: "JetBrains Mono, monospace", color: "#DC2626" }}>
+                              {fmt(Math.round(C.vatBurden))}원
+                            </span>
+                          </div>
+                        </React.Fragment>
+                      )}
+                      {taxType === "simple_tax" && (
+                        <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 700 }}>
+                          <span style={{ color: "#0369A1" }}>간이과세 납부세액 (1.5%)</span>
+                          <span style={{ fontFamily: "JetBrains Mono, monospace", color: "#DC2626" }}>
+                            {fmt(Math.round(C.vatBurden))}원
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </Sec>
+              </Card>
+
+              <Card>
+                <Sec emoji="🎯" title="목표 마진 분석">
+                  <NumIn label="목표 마진율" unit="%" value={tm} onChange={setTm} />
+                  {(() => {
+                    const diff = C.marginRate - nv(tm);
+                    const hit  = Math.abs(diff) < 0.05;
+                    const over = diff > 0;
+                    return (
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
+                        marginTop: 8, padding: "9px 12px", borderRadius: 8,
+                        background: hit ? "#EFF6FF" : over ? "#DCFCE7" : "#FEF3C7",
+                        border: "1px solid " + (hit ? "#93C5FD" : over ? "#86EFAC" : "#FCD34D") }}>
+                        <span style={{ fontSize: 11, color: "#475569" }}>
+                          입력한 목표 {fp(nv(tm))}% · 현재 설정가 기준 마진 {fp(C.marginRate)}%
+                        </span>
+                        <span style={{ fontSize: 12, fontWeight: 800,
+                          color: hit ? "#2563EB" : over ? "#16A34A" : "#B45309" }}>
+                          {hit ? "일치" : `${over ? "+" : ""}${fp(diff)}%p ${over ? "초과" : "부족"}`}
+                        </span>
+                      </div>
+                    );
+                  })()}
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 8 }}>
+                    <div style={{ background: "#EFEAE0", borderRadius: 8, padding: 12,
+                      border: "1px solid " + (C.SP > 0 && C.SP >= C.bepPrice ? "#16A34A28" : "#7F1D1D28") }}>
+                      <div style={{ fontSize: 10, color: "#475569", marginBottom: 6 }}>손익분기가 (BEP)</div>
+                      <div style={{ fontSize: 16, fontFamily: "JetBrains Mono, monospace", fontWeight: 700,
+                        color: C.SP > 0 && C.SP >= C.bepPrice ? "#4ADE80" : "#F87171" }}>
+                        {fmt(C.bepPrice)}원
+                      </div>
+                      <div style={{ fontSize: 10, marginTop: 4,
+                        color: C.SP >= C.bepPrice ? "#16A34A" : "#991B1B" }}>
+                        {C.SP > 0 && C.SP >= C.bepPrice ? "✅ 달성" : `❌ ${fmt(C.bepPrice - C.SP)}원 부족`}
+                      </div>
+                    </div>
+                    <div style={{ background: "#EFEAE0", borderRadius: 8, padding: 12,
+                      border: "1px solid " + (C.SP > 0 && C.SP >= C.minPriceAtTm ? "#1D4ED828" : "#78350F28") }}>
+                      <div style={{ fontSize: 10, color: "#475569", marginBottom: 6 }}>
+                        목표마진 {fp(nv(tm))}% 최소가
+                      </div>
+                      <div style={{ fontSize: 16, fontFamily: "JetBrains Mono, monospace", fontWeight: 700,
+                        color: C.SP > 0 && C.SP >= C.minPriceAtTm ? "#60A5FA" : "#FB923C" }}>
+                        {fmt(C.minPriceAtTm)}원
+                      </div>
+                      <div style={{ fontSize: 10, marginTop: 4,
+                        color: C.SP >= C.minPriceAtTm ? "#1D4ED8" : "#92400E" }}>
+                        {C.SP > 0 && C.SP >= C.minPriceAtTm ? "✅ 달성" : `❌ ${fmt(C.minPriceAtTm - C.SP)}원 부족`}
+                      </div>
+                    </div>
+                  </div>
+                </Sec>
+              </Card>
+            </div>
+
+            {/* ──── RIGHT: RESULTS ──── */}
+            <div>
+
+              {/* 옵션별 마진 비교 (옵션 2개 이상일 때) */}
+              {options.length > 1 && (
+                <Card style={{ marginBottom: 14 }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: "#334155",
+                    textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 10 }}>
+                    📊 옵션별 마진 비교
+                  </div>
+                  {options.map((opt, i) => {
+                    const isActive = activeOpt === i;
+                    const res = isActive
+                      ? { sp: C.SP, marginRate: C.marginRate }
+                      : (opt.bp ? computeOpt(opt) : null);
+                    const mr = res ? res.marginRate : 0;
+                    const sp_ = res ? Math.round(res.sp) : 0;
+                    return (
+                      <div key={i} onClick={() => setActiveOpt(i)}
+                        style={{ display: "flex", alignItems: "center", gap: 10,
+                          padding: "9px 12px", borderRadius: 8, marginBottom: 6,
+                          cursor: "pointer",
+                          background: isActive ? mc(mr) + "12" : "#FBFAF6",
+                          border: "1px solid " + (isActive ? mc(mr) + "40" : "#E5DFCF") }}>
+                        {/* 번호 */}
+                        <span style={{ width: 20, height: 20, borderRadius: "50%", flexShrink: 0,
+                          display: "inline-flex", alignItems: "center", justifyContent: "center",
+                          fontSize: 10, fontWeight: 700,
+                          background: isActive ? mc(mr) : "#E5DFCF",
+                          color: isActive ? "#fff" : "#94A3B8" }}>{i+1}</span>
+                        {/* 이름 */}
+                        <span style={{ flex: 1, fontSize: 12, fontWeight: isActive ? 700 : 500,
+                          color: isActive ? "#1E293B" : "#475569" }}>{opt.name}</span>
+                        {/* 매입가 */}
+                        <span style={{ fontSize: 11, color: "#64748B",
+                          fontFamily: "JetBrains Mono, monospace" }}>
+                          {opt.bp || "—"} {cur}
+                        </span>
+                        {/* 판매가 */}
+                        <span style={{ fontSize: 11, color: "#334155",
+                          fontFamily: "JetBrains Mono, monospace", fontWeight: 600 }}>
+                          {sp_ > 0 ? `₩${fmt(sp_)}` : "—"}
+                        </span>
+                        {/* 마진율 */}
+                        <span style={{ fontSize: 13, fontWeight: 900,
+                          fontFamily: "JetBrains Mono, monospace",
+                          color: mr > 0 ? mc(mr) : "#CBD5E1", minWidth: 50, textAlign: "right" }}>
+                          {mr > 0 ? `${fp(mr)}%` : "—"}
+                        </span>
+                      </div>
+                    );
+                  })}
+                  <div style={{ fontSize: 10, color: "#94A3B8", marginTop: 4, textAlign: "center" }}>
+                    행을 클릭하면 해당 옵션의 상세 분석이 아래에 표시됩니다
+                  </div>
+                </Card>
+              )}
+              <Card>
+                <PH>예상 마진 분석{options.length > 1 ? ` · ${options[activeOpt]?.name || ""}` : ""}</PH>
+                <div style={{ display: "flex", alignItems: "flex-end",
+                  justifyContent: "space-between", marginBottom: 18 }}>
+                  <div>
+                    <div style={{ fontSize: 80, fontWeight: 900, color: mc(C.marginRate),
+                      lineHeight: 1, fontFamily: "JetBrains Mono, monospace", letterSpacing: "-0.04em" }}>
+                      {fp(C.marginRate)}%
+                    </div>
+                    <div style={{ fontSize: 24, fontFamily: "JetBrains Mono, monospace",
+                      color: mc(C.marginRate), opacity: 0.75, marginTop: 6 }}>
+                      {C.margin >= 0 ? "+" : ""}{fmt(C.margin)}원
+                    </div>
+                    {(() => {
+                      const diff = C.marginRate - nv(tm);
+                      const hit  = Math.abs(diff) < 0.05;
+                      const over = diff > 0;
+                      const dCol = hit ? "#2563EB" : over ? "#16A34A" : "#B45309";
+                      return (
+                        <div style={{ fontSize: 12, marginTop: 8, color: dCol, fontWeight: 700 }}>
+                          🎯 목표 {fp(nv(tm))}% 대비 {hit ? "달성" : `${over ? "+" : ""}${fp(diff)}%p ${over ? "초과" : "부족"}`}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                  <div style={{ textAlign: "right", display: "grid", rowGap: 10 }}>
+                    <div>
+                      <div style={{ fontSize: 10, color: "#8C8472", marginBottom: 2 }}>판매가</div>
+                      <div style={{ fontSize: 18, fontFamily: "JetBrains Mono, monospace",
+                        color: "#475569" }}>{fmt(C.SP)}원</div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 10, color: "#8C8472", marginBottom: 2 }}>총비용</div>
+                      <div style={{ fontSize: 18, fontFamily: "JetBrains Mono, monospace",
+                        color: "#475569" }}>{fmt(C.totalCost)}원</div>
+                    </div>
+                  </div>
+                </div>
+                <div style={{ position: "relative", height: 12, background: "#EFEAE0",
+                  borderRadius: 6, overflow: "hidden", border: "1px solid #E5DFCF" }}>
+                  <div style={{
+                    height: "100%", borderRadius: 6,
+                    width: `${Math.min(Math.max(C.marginRate, 0), 50) / 50 * 100}%`,
+                    background: `linear-gradient(90deg,${mc(C.marginRate)}70,${mc(C.marginRate)})`,
+                    transition: "width .35s ease, background .35s",
+                  }} />
+                  {[10, 20, 30, 40].map(v => (
+                    <div key={v} style={{ position: "absolute", top: 0, bottom: 0,
+                      left: `${v / 50 * 100}%`, width: 1, background: "#E5DFCF" }} />
+                  ))}
+                  {nv(tm) > 0 && nv(tm) <= 50 && (
+                    <div style={{ position: "absolute", top: -3, bottom: -3,
+                      left: `${Math.min(Math.max(nv(tm), 0), 50) / 50 * 100}%`,
+                      width: 2, background: "#10192B", zIndex: 2 }} />
+                  )}
+                </div>
+                {nv(tm) > 0 && nv(tm) <= 50 && (
+                  <div style={{ position: "relative", height: 14, marginTop: 2 }}>
+                    <span style={{ position: "absolute",
+                      left: `${Math.min(Math.max(nv(tm), 0), 50) / 50 * 100}%`,
+                      transform: "translateX(-50%)", fontSize: 9, fontWeight: 800,
+                      color: "#10192B", whiteSpace: "nowrap" }}>
+                      ▲ 목표 {fp(nv(tm))}%
+                    </span>
+                  </div>
+                )}
+                <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4 }}>
+                  {["0%","10%","20%","30%","40%","50%"].map(v => (
+                    <span key={v} style={{ fontSize: 9, color: "#8C8472",
+                      fontFamily: "JetBrains Mono, monospace" }}>{v}</span>
+                  ))}
+                </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 14 }}>
+                  <div style={{ padding: "4px 12px", borderRadius: 100, fontSize: 11, fontWeight: 700,
+                    background: mc(C.marginRate) + "15",
+                    border: "1px solid " + mc(C.marginRate) + "35",
+                    color: mc(C.marginRate) }}>
+                    {C.marginRate >= 20 ? "🟢 우수 (20%+)"
+                      : C.marginRate >= 10 ? "🟡 양호 (10~20%)"
+                      : C.marginRate >= 0  ? "🟠 주의 (0~10%)"
+                      : "🔴 손실"}
+                  </div>
+                  <div style={{ padding: "4px 12px", borderRadius: 100,
+                    background: "#FBFAF6", border: "1px solid #E5DFCF",
+                    fontSize: 11, color: "#475569" }}>
+                    {ch === "rocket" ? "🚀 로켓그로스" : "🏪 마켓플레이스"} · {CATS[ci].label}
+                    {C.promoActive ? ` · 🎁 ${promo === "90" ? "첫90일" : "+270일"}` : ""}
+                  </div>
+                </div>
+              </Card>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 14 }}>
+                {[
+                  { t: "수입원가",         v: C.impTotal,  c: "#3B82F6",
+                    s: `매입 ${fmt(C.buyKrw)}원` },
+                  { t: "판매/운영비",      v: C.sellTotal, c: "#EE4D2D",
+                    s: `수수료 ${fp(C.catFee)}% + 물류비` },
+                  { t: "손익분기가 (BEP)", v: C.bepPrice,
+                    c: C.SP >= C.bepPrice ? "#4ADE80" : "#F87171",
+                    s: C.SP >= C.bepPrice ? "현재 판매가로 달성" : `${fmt(C.bepPrice - C.SP)}원 인상 필요` },
+                  { t: `목표 ${fp(nv(tm))}% 최소가`, v: C.minPriceAtTm,
+                    c: C.SP >= C.minPriceAtTm ? "#60A5FA" : "#FB923C",
+                    s: C.SP >= C.minPriceAtTm ? "현재 판매가로 달성" : `${fmt(C.minPriceAtTm - C.SP)}원 인상 필요` },
+                ].map((m, i) => (
+                  <div key={i} style={{ background: "#FFFFFF", borderRadius: 10,
+                    padding: "14px 16px", border: "1px solid " + m.c + "20" }}>
+                    <div style={{ fontSize: 10, color: "#475569", marginBottom: 6 }}>{m.t}</div>
+                    <div style={{ fontSize: 18, fontFamily: "JetBrains Mono, monospace",
+                      color: m.c, fontWeight: 700 }}>{fmt(m.v)}원</div>
+                    <div style={{ fontSize: 10, color: "#334155", marginTop: 4 }}>{m.s}</div>
+                  </div>
+                ))}
+              </div>
+
+              <Card>
+                <PH>판매가 구성 분석 (100% 스택)</PH>
+                <div style={{ display: "flex", height: 30, borderRadius: 6, overflow: "hidden", gap: 1 }}>
+                  {BARS.filter(b => C.SP > 0 && b.val > 0).map((b, i) => (
+                    <div key={i}
+                      title={`${b.label}: ${fmt(b.val)}원 (${fp(b.val / C.SP * 100)}%)`}
+                      style={{ background: b.color, height: "100%",
+                        width: `${b.val / C.SP * 100}%`,
+                        transition: "width .35s ease", flexShrink: 0 }} />
+                  ))}
+                </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 16px", marginTop: 10 }}>
+                  {BARS.map((b, i) => (
+                    <div key={i} style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                      <div style={{ width: 8, height: 8, borderRadius: 2,
+                        background: b.color, flexShrink: 0 }} />
+                      <span style={{ fontSize: 11, color: "#475569" }}>{b.label}</span>
+                      <span style={{ fontSize: 11, fontFamily: "JetBrains Mono, monospace", color: "#8C8472" }}>
+                        {C.SP > 0 ? fp(b.val / C.SP * 100) : "0.0"}%
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </Card>
+
+              <Card>
+                <PH>비용 상세 내역</PH>
+                <div style={{ fontSize: 11, color: "#3B82F6", fontWeight: 700, marginBottom: 8 }}>
+                  📦 수입원가{simpleMode ? " · 간편비율 적용 중 (관세/부가세/배송비 포함됨)" : ""}
+                </div>
+                <CostRow label="  · 매입원가 (KRW 환산)" value={C.buyKrw} />
+                <CostRow label={`  · 관세 (${cr}%)`}     value={C.customs} />
+                <CostRow label="  · 수입부가세 (10%)"     value={C.vatAmt} />
+                <CostRow label="  · 포워딩/국제배송비"    value={C.fwAmt} />
+                <CostRow label="  · 통관비"              value={C.clAmt} />
+                <CostRow label="수입원가 소계" value={C.impTotal} accent="#3B82F6" bold />
+                <div style={{ height: 10 }} />
+                <div style={{ fontSize: 11, color: "#EE4D2D", fontWeight: 700, marginBottom: 8 }}>
+                  🛒 판매/운영비{C.promoActive ? ` · 로켓그로스 ${promo === "90" ? "첫 90일" : "+270일"} 혜택 적용 중` : ""}
+                </div>
+                <CostRow label={`  · 카테고리 수수료 (${fp(C.catFee)}%)`} value={C.commission} />
+                <CostRow label={`  · ${ch === "rocket" ? "로켓그로스 물류비" : "마켓플레이스 배송비"}${promo === "90" ? " (혜택 0원)" : ""}`} value={C.logistic} />
+                <CostRow label={`  · 광고비 (${ar}%)`}         value={C.adCost} />
+                <CostRow label={`  · 반품비용 (${rr}% × 30%)${C.promoActive ? " (혜택 0원)" : ""}`} value={C.retCost} />
+                <CostRow label="판매/운영비 소계" value={C.sellTotal} accent="#EE4D2D" bold />
+                {taxType !== "exempt" && (
+                  <React.Fragment>
+                    <div style={{ fontSize: 11, color: "#0369A1", fontWeight: 700, marginBottom: 8, marginTop: 4 }}>
+                      🧾 부가세 ({taxType === "general" ? "일반과세자" : "간이과세자"})
+                    </div>
+                    {taxType === "general" && (
+                      <React.Fragment>
+                        <CostRow label="  · 매출세액 (판매가÷11)" value={C.outputVAT} />
+                        <CostRow label="  · 매입세액공제 (수입부가세)" value={-C.inputVATCredit} />
+                      </React.Fragment>
+                    )}
+                    <CostRow label="  · 순 납부 부가세" value={C.vatBurden} accent="#0369A1" bold />
+                  </React.Fragment>
+                )}
+                <div style={{ height: 8 }} />
+                <CostRow label="총 비용" value={C.totalCost} accent="#64748B" bold />
+                <div style={{ display: "flex", justifyContent: "space-between",
+                  alignItems: "center", padding: "12px 0 4px",
+                  borderTop: "1px solid #E5DFCF", marginTop: 8 }}>
+                  <span style={{ fontSize: 15, fontWeight: 900, color: "#1E293B" }}>예상 마진</span>
+                  <div style={{ textAlign: "right" }}>
+                    <span style={{ fontSize: 19, fontWeight: 900,
+                      fontFamily: "JetBrains Mono, monospace", color: mc(C.marginRate) }}>
+                      {C.margin >= 0 ? "+" : ""}{fmt(C.margin)}원
+                    </span>
+                    <span style={{ marginLeft: 8, fontSize: 15,
+                      fontFamily: "JetBrains Mono, monospace",
+                      color: mc(C.marginRate), opacity: 0.75 }}>
+                      ({fp(C.marginRate)}%)
+                    </span>
+                  </div>
+                </div>
+              </Card>
+            </div>
+          </div>
+
+          {/* ── GitHub 동기화 설정 패널 ── */}
+          {showGhPanel && (
+            <div style={{ position: "fixed", inset: 0, zIndex: 1100,
+              display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <div onClick={() => setShowGhPanel(false)}
+                style={{ position: "absolute", inset: 0, background: "rgba(16,25,43,0.45)", backdropFilter: "blur(3px)" }} />
+              <div style={{ position: "relative", width: 460, background: "#fff",
+                borderRadius: 16, boxShadow: "0 8px 40px rgba(0,0,0,0.18)",
+                overflow: "hidden", zIndex: 1 }}>
+                {/* 헤더 */}
+                <div style={{ background: "#10192B", padding: "20px 24px", color: "#fff" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <div>
+                      <div style={{ fontWeight: 900, fontSize: 15 }}>☁ GitHub 자동 동기화 설정</div>
+                      <div style={{ fontSize: 11, color: "#7C8AA5", marginTop: 4 }}>
+                        저장 데이터가 GitHub에 자동으로 백업되어 어느 기기에서나 불러올 수 있습니다
+                      </div>
+                    </div>
+                    <button onClick={() => setShowGhPanel(false)}
+                      style={{ background: "none", border: "none", color: "#7C8AA5",
+                        fontSize: 20, cursor: "pointer" }}>✕</button>
+                  </div>
+                  {/* 상태 뱃지 */}
+                  <div style={{ marginTop: 12, display: "inline-flex", alignItems: "center", gap: 6,
+                    padding: "4px 12px", borderRadius: 20,
+                    background: syncStatus === "success" ? "#16A34A20" : syncStatus === "error" ? "#DC262620" : "#ffffff15",
+                    border: "1px solid " + (syncStatus === "success" ? "#4ADE8050" : syncStatus === "error" ? "#F8717150" : "#ffffff20") }}>
+                    <div style={{ width: 7, height: 7, borderRadius: "50%",
+                      background: syncStatus === "success" ? "#4ADE80" : syncStatus === "error" ? "#F87171"
+                        : syncStatus === "loading" ? "#60A5FA" : "#94A3B8" }} />
+                    <span style={{ fontSize: 11, color: "#fff" }}>
+                      {syncStatus === "success"  ? "동기화 완료" :
+                       syncStatus === "error"    ? "동기화 오류 — 토큰/저장소명 확인 필요" :
+                       syncStatus === "loading"  ? "동기화 중..." :
+                       syncStatus === "notfound" ? "파일 없음 (첫 저장 시 자동 생성)" :
+                       ghConfigured ? "연결됨 (미동기화)" : "미설정"}
+                    </span>
+                  </div>
+                </div>
+
+                {/* 설정 입력 */}
+                <div style={{ padding: "24px" }}>
+                  {/* PAT */}
+                  <div style={{ marginBottom: 16 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: "#334155",
+                      textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 6 }}>
+                      GitHub Personal Access Token (PAT)
+                    </div>
+                    <input type="password" value={ghToken}
+                      onChange={e => setGhToken(e.target.value)}
+                      placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
+                      style={{ ...INPUT_STYLE, fontFamily: "JetBrains Mono, monospace", fontSize: 12 }} />
+                    <div style={{ fontSize: 10, color: "#94A3B8", marginTop: 4 }}>
+                      GitHub → Settings → Developer settings → Personal access tokens → Fine-grained tokens<br/>
+                      권한: <strong>Contents</strong> (Read and Write) 필요
+                    </div>
+                  </div>
+
+                  {/* 저장소 */}
+                  <div style={{ marginBottom: 16 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: "#334155",
+                      textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 6 }}>
+                      저장소 (owner/repo)
+                    </div>
+                    <input type="text" value={ghRepo}
+                      onChange={e => setGhRepo(e.target.value)}
+                      placeholder="예: rcy42/moriva-data"
+                      style={{ ...INPUT_STYLE, fontFamily: "JetBrains Mono, monospace", fontSize: 12 }} />
+                  </div>
+
+                  {/* 파일 경로 */}
+                  <div style={{ marginBottom: 20 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: "#334155",
+                      textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 6 }}>
+                      저장 파일 경로
+                    </div>
+                    <input type="text" value={ghPath}
+                      onChange={e => setGhPath(e.target.value)}
+                      placeholder="moriva_margin_data.json"
+                      style={{ ...INPUT_STYLE, fontFamily: "JetBrains Mono, monospace", fontSize: 12 }} />
+                    <div style={{ fontSize: 10, color: "#94A3B8", marginTop: 4 }}>
+                      소싱 앱과 다른 파일명 사용 권장
+                    </div>
+                  </div>
+
+                  {/* 경고 박스 */}
+                  <div style={{ background: "#FFFBEB", border: "1px solid #FCD34D",
+                    borderRadius: 8, padding: "10px 14px", marginBottom: 20, fontSize: 11, color: "#92400E" }}>
+                    ⚠ PAT는 이 기기의 브라우저 localStorage에만 저장되며 외부로 전송되지 않습니다.<br/>
+                    공용 PC에서는 설정 후 반드시 토큰을 지워주세요.
+                  </div>
+
+                  {/* 버튼 */}
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button onClick={() => {
+                        localStorage.setItem("moriva_gh_token", ghToken);
+                        localStorage.setItem("moriva_gh_repo", ghRepo);
+                        localStorage.setItem("moriva_gh_path", ghPath);
+                        setSyncStatus("idle");
+                        setGhSha(null);
+                        didInitPull.current = false;
+                        setShowGhPanel(false);
+                        setTimeout(() => { if (ghToken && ghRepo) pullFromGitHub(); }, 100);
+                      }}
+                      style={{ flex: 2, padding: "10px 0", borderRadius: 8, border: "none",
+                        background: "#10192B", color: "#fff", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>
+                      저장 및 동기화 시작
+                    </button>
+                    <button onClick={() => {
+                        if (!window.confirm("GitHub 동기화 설정을 초기화할까요?")) return;
+                        setGhToken(""); setGhRepo(""); setGhSha(null);
+                        localStorage.removeItem("moriva_gh_token");
+                        localStorage.removeItem("moriva_gh_repo");
+                        setSyncStatus("idle");
+                      }}
+                      style={{ flex: 1, padding: "10px 0", borderRadius: 8,
+                        border: "1px solid #FCA5A5", background: "#FEF2F2",
+                        color: "#DC2626", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>
+                      연결 해제
+                    </button>
+                  </div>
+
+                  {ghConfigured && (
+                    <button onClick={() => { pullFromGitHub(); }}
+                      style={{ width: "100%", marginTop: 8, padding: "9px 0", borderRadius: 8,
+                        border: "1px solid #93C5FD", background: "#EFF6FF",
+                        color: "#3B82F6", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>
+                      ⟳ 지금 GitHub에서 불러오기 (수동 동기화)
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── 저장목록 드로어 ── */}
+          {showSaved && (
+            <div style={{ position: "fixed", inset: 0, zIndex: 1000, display: "flex" }}>
+              {/* 백드롭 */}
+              <div onClick={() => setShowSaved(false)}
+                style={{ flex: 1, background: "rgba(16,25,43,0.35)", backdropFilter: "blur(2px)" }} />
+              {/* 패널 */}
+              <div style={{ width: 420, background: "#F7F4EC", display: "flex",
+                flexDirection: "column", boxShadow: "-6px 0 32px rgba(0,0,0,0.14)" }}>
+                {/* 헤더 */}
+                <div style={{ padding: "20px 22px 14px", background: "#10192B", color: "#fff" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <div>
+                      <div style={{ fontWeight: 900, fontSize: 15 }}>📋 저장된 계산 목록</div>
+                      <div style={{ fontSize: 11, color: "#7C8AA5", marginTop: 3 }}>
+                        {savedList.length}개 저장됨 · 기기 로컬 저장
+                      </div>
+                    </div>
+                    <button onClick={() => setShowSaved(false)}
+                      style={{ background: "none", border: "none", color: "#7C8AA5",
+                        fontSize: 20, cursor: "pointer" }}>✕</button>
+                  </div>
+                  {/* 카테고리 필터 */}
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 14 }}>
+                    {["ALL","ACTIVE","CAMP","HOME","PET","BAG"].map(c => (
+                      <button key={c} onClick={() => setFilterCat(c)}
+                        style={{ padding: "4px 12px", borderRadius: 20,
+                          border: "1px solid " + (filterCat === c ? "transparent" : "#2A3A52"),
+                          background: filterCat === c
+                            ? (c === "ALL" ? "#EE4D2D" : (MCAT_COLORS[c] || "#EE4D2D"))
+                            : "transparent",
+                          color: filterCat === c ? "#fff" : "#7C8AA5",
+                          fontSize: 11, fontWeight: 700, cursor: "pointer" }}>
+                        {c === "ALL" ? "전체" : c}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {/* 목록 */}
+                <div style={{ flex: 1, overflowY: "auto", padding: "16px 18px" }}>
+                  {savedList.filter(i => filterCat === "ALL" || i.mCat === filterCat).length === 0 ? (
+                    <div style={{ textAlign: "center", color: "#94A3B8", fontSize: 13, padding: 48 }}>
+                      저장된 항목이 없습니다
+                    </div>
+                  ) : savedList.map((item, idx) => {
+                    if (filterCat !== "ALL" && item.mCat !== filterCat) return null;
+                    const mr = parseFloat(item._marginRate || 0);
+                    return (
+                      <div key={idx} onClick={() => loadItem(item)}
+                        style={{ background: "#fff", borderRadius: 10, padding: "13px 15px",
+                          border: "1px solid #E5DFCF", marginBottom: 10, cursor: "pointer",
+                          boxShadow: "0 1px 4px rgba(0,0,0,0.04)" }}
+                        onMouseEnter={e => e.currentTarget.style.boxShadow="0 3px 12px rgba(0,0,0,0.1)"}
+                        onMouseLeave={e => e.currentTarget.style.boxShadow="0 1px 4px rgba(0,0,0,0.04)"}>
+
+                        {/* 이미지 + 정보 헤더 */}
+                        <div style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+                          {item.imgUrl && (
+                            <div style={{ width: 72, height: 72, flexShrink: 0, borderRadius: 8,
+                              overflow: "hidden", border: "1px solid #E5DFCF", background: "#F7F4EC" }}>
+                              <img src={item.imgUrl} alt=""
+                                style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                                onError={e => e.target.parentElement.style.display="none"} />
+                            </div>
+                          )}
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                              <div style={{ fontWeight: 700, fontSize: 13, color: "#1E293B",
+                                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                                flex: 1, marginRight: 8 }}>
+                                {item.pName || <span style={{ color: "#94A3B8" }}>(상품명 없음)</span>}
+                              </div>
+                              <button onClick={(e) => deleteItem(idx, e)}
+                                style={{ background: "none", border: "none", color: "#CBD5E1",
+                                  cursor: "pointer", fontSize: 16, padding: "0", lineHeight: 1, flexShrink: 0 }}>✕</button>
+                            </div>
+                            <div style={{ display: "flex", gap: 5, marginTop: 6, flexWrap: "wrap" }}>
+                              {item.mCat && (
+                                <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 12,
+                                  background: MCAT_COLORS[item.mCat] || "#10192B",
+                                  color: "#fff", fontWeight: 700 }}>{item.mCat}</span>
+                              )}
+                              <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 12,
+                                background: mc(mr) + "18", color: mc(mr), fontWeight: 700,
+                                border: "1px solid " + mc(mr) + "40" }}>
+                                마진 {item._marginRate}%
+                              </span>
+                              {item.ch === "rocket" && (
+                                <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 12,
+                                  background: "#EFF6FF", color: "#3B82F6", fontWeight: 700 }}>🚀 로켓</span>
+                              )}
+                              {item.url1688 && (
+                                <span onClick={e => { e.stopPropagation(); window.open(item.url1688,"_blank"); }}
+                                  style={{ fontSize: 10, padding: "2px 8px", borderRadius: 12,
+                                    background: "#FFF3E0", color: "#EA6000", fontWeight: 700, cursor: "pointer" }}>
+                                  1688 🔗
+                                </span>
+                              )}
+                            </div>
+                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 2, marginTop: 7 }}>
+                              {(() => {
+                            const aIdx = typeof item.activeOpt === "number" ? item.activeOpt : 0;
+                            const primaryOpt = item.options && item.options[0];
+                            const activeOpt_ = item.options && item.options[aIdx];
+                            const dispSP = activeOpt_ && activeOpt_._sp > 0 ? activeOpt_._sp : nv(item.sp);
+                            const dispBP = activeOpt_ ? activeOpt_.bp : item.bp;
+                            return (
+                              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 2, marginTop: 7 }}>
+                                <div style={{ fontSize: 11, color: "#64748B" }}>
+                                  판매가 <span style={{ color: "#1E293B", fontFamily: "JetBrains Mono, monospace",
+                                    fontWeight: 600 }}>₩{fmt(Math.round(dispSP))}</span>
+                                </div>
+                                <div style={{ fontSize: 11, color: "#64748B" }}>
+                                  매입가 <span style={{ color: "#1E293B", fontFamily: "JetBrains Mono, monospace",
+                                    fontWeight: 600 }}>{dispBP} {item.cur}</span>
+                                </div>
+                              </div>
+                            );
+                          })()}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* 옵션 목록 */}
+                        {item.options && item.options.length > 0 && (
+                          <div style={{ marginTop: 10, borderTop: "1px solid #F1ECE0", paddingTop: 8 }}>
+                            <div style={{ fontSize: 10, color: "#94A3B8", fontWeight: 700,
+                              marginBottom: 5, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                              옵션 {item.options.length}개
+                            </div>
+                            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                              {item.options.map((opt, oi) => {
+                                const omr = parseFloat(opt._marginRate || 0);
+                                return (
+                                  <div key={oi} style={{ display: "flex", justifyContent: "space-between",
+                                    alignItems: "center", background: "#FBFAF6",
+                                    borderRadius: 6, padding: "4px 8px" }}>
+                                    <span style={{ fontSize: 11, color: "#334155", fontWeight: 600,
+                                      flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                      {opt.name || `옵션 ${oi+1}`}
+                                    </span>
+                                    <div style={{ display: "flex", gap: 8, flexShrink: 0, marginLeft: 8 }}>
+                                      <span style={{ fontSize: 10, color: "#64748B",
+                                        fontFamily: "JetBrains Mono, monospace" }}>
+                                        ₩{fmt(Math.round(opt._sp || 0))}
+                                      </span>
+                                      {opt._marginRate && (
+                                        <span style={{ fontSize: 10, fontWeight: 700, color: mc(omr) }}>
+                                          {opt._marginRate}%
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+
+                        {item.pMemo && (
+                          <div style={{ fontSize: 11, color: "#94A3B8", marginTop: 8,
+                            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {item.pMemo}
+                          </div>
+                        )}
+                        <div style={{ fontSize: 10, color: "#CBD5E1", marginTop: 7 }}>
+                          {new Date(item.savedAt).toLocaleDateString("ko-KR",
+                            { month:"short", day:"numeric", hour:"2-digit", minute:"2-digit" })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                {/* 하단 백업 */}
+                <div style={{ padding: "14px 18px", borderTop: "1px solid #E5DFCF",
+                  background: "#FBFAF6", display: "flex", gap: 8 }}>
+                  <button onClick={() => {
+                      const blob = new Blob([JSON.stringify(savedList,null,2)],{type:"application/json"});
+                      const a = document.createElement("a");
+                      a.href = URL.createObjectURL(blob);
+                      a.download = "moriva_margin_backup.json"; a.click();
+                    }}
+                    style={{ flex: 1, padding: "8px 0", borderRadius: 8, border: "1px solid #E5DFCF",
+                      background: "#fff", cursor: "pointer", fontWeight: 700, fontSize: 12, color: "#334155" }}>
+                    ⬇ JSON 백업
+                  </button>
+                  <label style={{ flex: 1, display: "block" }}>
+                    <div style={{ padding: "8px 0", borderRadius: 8, border: "1px solid #E5DFCF",
+                      background: "#fff", cursor: "pointer", fontWeight: 700, fontSize: 12,
+                      color: "#334155", textAlign: "center" }}>
+                      ⬆ JSON 복원
+                    </div>
+                    <input type="file" accept=".json" style={{ display: "none" }}
+                      onChange={e => {
+                        const file = e.target.files[0]; if (!file) return;
+                        const reader = new FileReader();
+                        reader.onload = ev => {
+                          try {
+                            const data = JSON.parse(ev.target.result);
+                            if (Array.isArray(data)) persist([...data,...savedList].slice(0,100));
+                          } catch {}
+                        };
+                        reader.readAsText(file);
+                      }} />
+                  </label>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+  </script>
+</body>
+</html>
