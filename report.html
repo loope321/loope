@@ -1,1 +1,163 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LOOPE 판매 분석</title>
+  <style>
+    * { box-sizing: border-box; }
 
+    body {
+      margin: 0;
+      padding: 30px;
+      background: #f4f6fa;
+      color: #202938;
+      font-family: Arial, sans-serif;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: auto;
+    }
+
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 30px;
+    }
+
+    .header h1 { margin: 0; font-size: 28px; }
+    .date { color: #778196; font-size: 13px; }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 16px;
+    }
+
+    .card {
+      background: white;
+      padding: 24px;
+      border-radius: 14px;
+      box-shadow: 0 2px 10px rgba(0,0,0,.04);
+    }
+
+    .label { color: #778196; font-size: 14px; }
+    .value { font-size: 27px; font-weight: bold; margin-top: 15px; }
+
+    .section { margin-top: 28px; }
+    .section h2 { font-size: 19px; margin-bottom: 14px; }
+
+    .channel {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+
+    .empty {
+      color: #929bad;
+      padding: 25px 0;
+      font-size: 14px;
+    }
+
+    .notice {
+      background: #eef4ff;
+      color: #315b9b;
+      padding: 15px;
+      border-radius: 10px;
+      font-size: 13px;
+      margin-top: 20px;
+    }
+
+    @media (max-width: 700px) {
+      body { padding: 18px; }
+      .grid { grid-template-columns: repeat(2, 1fr); }
+      .channel { grid-template-columns: 1fr; }
+      .value { font-size: 22px; }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="container">
+
+    <header class="header">
+      <div>
+        <h1>LOOPE 판매 분석</h1>
+        <div class="date">DAILY SALES REPORT</div>
+      </div>
+      <div class="date">데이터 연결 준비 중</div>
+    </header>
+
+    <div class="grid">
+      <div class="card">
+        <div class="label">총매출</div>
+        <div class="value">₩0</div>
+      </div>
+
+      <div class="card">
+        <div class="label">실제 예상이익</div>
+        <div class="value">₩0</div>
+      </div>
+
+      <div class="card">
+        <div class="label">총 광고비</div>
+        <div class="value">₩0</div>
+      </div>
+
+      <div class="card">
+        <div class="label">광고 ROAS</div>
+        <div class="value">0%</div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>판매 채널별 실적</h2>
+      <div class="channel">
+        <div class="card">
+          <div class="label">쿠팡</div>
+          <div class="empty">판매 데이터 연결 후 표시됩니다.</div>
+        </div>
+
+        <div class="card">
+          <div class="label">네이버 스마트스토어</div>
+          <div class="empty">판매 데이터 연결 후 표시됩니다.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>상품별 수익성 분석</h2>
+      <div class="card">
+        <div class="empty">
+          상품별 매출, 판매량, 원가, 수수료, 배송비, 광고비 및 실제 이익이 표시됩니다.
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>AI 판매 분석</h2>
+      <div class="card">
+        <div class="empty">
+          집중 상품 / 유지 상품 / 축소 상품 / 중단 상품 분석이 표시됩니다.
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>오늘의 마케팅 실행 지침</h2>
+      <div class="card">
+        <div class="empty">
+          오늘 실행할 광고 수정, 상품 개선 및 판매 전략이 표시됩니다.
+        </div>
+      </div>
+    </div>
+
+    <div class="notice">
+      현재 화면은 기본 대시보드입니다. 실제 판매 데이터는 API 연동 후 표시됩니다.
+    </div>
+
+  </div>
+</body>
+</html>
