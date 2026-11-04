@@ -118,7 +118,7 @@
     <div class="grid">
       <div class="card">
         <div class="label">총매출</div>
-        <div class="value">₩0</div>
+        <div class="value" id="total-sales">—</div>
       </div>
 
       <div class="card">
@@ -142,12 +142,12 @@
       <div class="channel">
         <div class="card">
           <div class="label">쿠팡</div>
-          <div class="empty">판매 데이터 연결 후 표시됩니다.</div>
+          <div class="empty" id="coupang-sales">데이터 확인 중...</div>
         </div>
 
         <div class="card">
           <div class="label">네이버 스마트스토어</div>
-          <div class="empty">판매 데이터 연결 후 표시됩니다.</div>
+          <div class="empty" id="naver-sales">데이터 확인 중...</div>
         </div>
       </div>
     </div>
@@ -179,9 +179,7 @@
       </div>
     </div>
 
-    <div class="notice">
-      현재 화면은 기본 대시보드입니다. 실제 판매 데이터는 API 연동 후 표시됩니다.
-    </div>
+    <div class="notice" id="sales-status" role="status" aria-live="polite">전체 기간 매출을 조회합니다. 테스트 데이터가 포함될 수 있습니다.</div>
 
   </div>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
@@ -197,6 +195,51 @@
       const projectUrl = 'https://ygoxivmgqspfgygiczko.supabase.co';
       const publishableKey = 'sb_publishable_S1pP4K6tpX8I62wqHY3u4g_KmaY7Nz6'; // public client key; NEVER use secret or service_role here
       let client;
+      let loadGeneration = 0;
+      const totalSalesElement = document.getElementById('total-sales');
+      const coupangSalesElement = document.getElementById('coupang-sales');
+      const naverSalesElement = document.getElementById('naver-sales');
+      const salesStatusElement = document.getElementById('sales-status');
+      const krw = (n) => '₩' + Math.round(n).toLocaleString('ko-KR');
+
+      async function loadSales(userId) {
+        const generation = ++loadGeneration;
+        totalSalesElement.textContent = '조회 중...';
+        coupangSalesElement.textContent = '조회 중...';
+        naverSalesElement.textContent = '조회 중...';
+        salesStatusElement.textContent = '로그인 계정의 전체 기간 매출을 조회하고 있습니다.';
+        try {
+          let rows = [];
+          const pageSize = 500;
+          for (let start = 0; ; start += pageSize) {
+            const { data, error } = await client.from('daily_sales')
+              .select('platform,total_sales,order_count,units_sold')
+              .eq('user_id', userId)
+              .range(start, start + pageSize - 1);
+            if (error) throw error;
+            if (generation !== loadGeneration) return;
+            rows.push(...(data || []));
+            if (!data || data.length < pageSize) break;
+          }
+          if (generation !== loadGeneration) return;
+          const totals = { coupang: 0, naver: 0 };
+          rows.forEach(row => {
+            if (Object.prototype.hasOwnProperty.call(totals, row.platform)) {
+              totals[row.platform] += Number(row.total_sales || 0);
+            }
+          });
+          totalSalesElement.textContent = krw(totals.coupang + totals.naver);
+          coupangSalesElement.textContent = '누적 매출 ' + krw(totals.coupang);
+          naverSalesElement.textContent = '누적 매출 ' + krw(totals.naver);
+          salesStatusElement.textContent = '로그인 계정의 전체 기간 매출 합계입니다. 테스트 데이터가 포함될 수 있으며, 실제 자동 수집 및 순이익 계산은 아직 연결되지 않았습니다. (매출 기록 ' + rows.length + '건)';
+        } catch (error) {
+          if (generation !== loadGeneration) return;
+          totalSalesElement.textContent = '조회 실패';
+          coupangSalesElement.textContent = '조회 실패';
+          naverSalesElement.textContent = '조회 실패';
+          salesStatusElement.textContent = '매출 조회 오류: ' + (error.message || '연결 상태를 확인해줘.');
+        }
+      }
 
       function showSession(session) {
         const signedIn = Boolean(session && session.user);
@@ -204,7 +247,15 @@
         dashboard.style.display = signedIn ? 'block' : 'none';
         userEmail.textContent = signedIn ? (session.user.email || '') : '';
         if (!signedIn) loginForm.reset();
-        if (signedIn) authMessage.textContent = '';
+        if (signedIn) {
+          authMessage.textContent = '';
+          loadSales(session.user.id);
+        } else {
+          ++loadGeneration;
+          totalSalesElement.textContent = '—';
+          coupangSalesElement.textContent = '로그인이 필요합니다.';
+          naverSalesElement.textContent = '로그인이 필요합니다.';
+        }
       }
 
       async function initialize() {
